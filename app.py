@@ -4,14 +4,16 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 
-# Page settings
+# ---------------- PAGE CONFIG ----------------
+
 st.set_page_config(
     page_title="Stock Analyzer",
     page_icon="📈",
     layout="wide"
 )
 
-# Custom CSS
+# ---------------- CUSTOM CSS ----------------
+
 st.markdown("""
 <style>
 .stApp {
@@ -20,228 +22,381 @@ st.markdown("""
 }
 [data-testid="stMetric"] {
     background-color: #151f32;
-    padding: 20px;
+    padding: 18px;
     border-radius: 12px;
+    border: 1px solid #26344d;
 }
 h1, h2, h3 {
     color: #60a5fa;
 }
+.stButton > button {
+    background-color: #2563eb;
+    color: white;
+    border-radius: 8px;
+    border: none;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# Header
-st.title("📈 STOCK ANALYZER")
-st.caption("Real-time stock research powered by Yahoo Finance")
 
+# ---------------- HEADER ----------------
+
+st.title("📈 STOCK ANALYZER")
+st.caption("Smart Stock Research | Powered by Yahoo Finance")
 st.divider()
 
-# Search
-col1, col2 = st.columns([4, 1])
 
-with col1:
-    ticker = st.text_input(
-        "Enter Stock Symbol",
-        placeholder="Example: AAPL, NVDA, TSLA, RELIANCE.NS"
-    ).strip().upper()
+# ---------------- HELPER FUNCTIONS ----------------
 
-with col2:
-    st.write("")
-    st.write("")
-    search = st.button("Analyze Stock", use_container_width=True)
-
-# Format numbers
 def format_number(value):
-    if value is None or pd.isna(value):
+
+    if value is None:
         return "N/A"
 
-    if abs(value) >= 1e12:
-        return f"{value / 1e12:.2f} T"
-    elif abs(value) >= 1e9:
-        return f"{value / 1e9:.2f} B"
-    elif abs(value) >= 1e6:
-        return f"{value / 1e6:.2f} M"
-    else:
+    try:
+        if pd.isna(value):
+            return "N/A"
+
+        value = float(value)
+
+        if abs(value) >= 1e12:
+            return f"{value / 1e12:.2f} T"
+
+        elif abs(value) >= 1e9:
+            return f"{value / 1e9:.2f} B"
+
+        elif abs(value) >= 1e6:
+            return f"{value / 1e6:.2f} M"
+
         return f"{value:,.2f}"
 
-# Analyze
-if search and ticker:
+    except (ValueError, TypeError):
+        return "N/A"
 
-    with st.spinner("Fetching stock data..."):
+
+def get_stock_symbol(query):
+
+    query = query.strip().upper()
+
+    if not query:
+        return None
+
+    # First try exact ticker
+    try:
+        stock = yf.Ticker(query)
+        info = stock.info
+
+        if info and info.get("quoteType") == "EQUITY":
+            return query
+
+    except Exception:
+        pass
+
+    # Try Indian exchanges
+    for suffix in [".NS", ".BO"]:
 
         try:
-            stock = yf.Ticker(ticker)
-
+            symbol = query + suffix
+            stock = yf.Ticker(symbol)
             info = stock.info
-            history = stock.history(period="1y")
 
-            if not info or history.empty:
-                st.error("Stock not found or data unavailable.")
-                st.stop()
+            if info and info.get("quoteType") == "EQUITY":
+                return symbol
 
-            # Company details
-            st.subheader(
-                info.get("longName", ticker)
+        except Exception:
+            pass
+
+    # Search by company name
+    try:
+        results = yf.Search(
+            query,
+            max_results=10,
+            news_count=0
+        )
+
+        for item in results.quotes:
+
+            if item.get("quoteType") == "EQUITY":
+                return item.get("symbol")
+
+    except Exception:
+        pass
+
+    return None
+
+
+# ---------------- STOCK SEARCH ----------------
+
+st.subheader("🔍 Search Company")
+
+with st.form("stock_search"):
+
+    ticker_input = st.text_input(
+        "Company Name or Stock Symbol",
+        placeholder="Netflix, Apple, Crizac, AAPL, RELIANCE.NS"
+    )
+
+    search = st.form_submit_button(
+        "Analyze Stock",
+        use_container_width=True
+    )
+
+
+# ---------------- ANALYSIS ----------------
+
+if search:
+
+    if not ticker_input.strip():
+
+        st.warning("Please enter a company name or ticker.")
+
+    else:
+
+        with st.spinner("Searching Yahoo Finance..."):
+
+            symbol = get_stock_symbol(ticker_input)
+
+        if not symbol:
+
+            st.error(
+                "Stock not found. Try entering its exact ticker symbol."
             )
 
-            st.write(
-                info.get("longBusinessSummary",
-                         "Company description unavailable.")
-            )
+        else:
 
-            st.divider()
+            with st.spinner(f"Fetching data for {symbol}..."):
 
-            # Price
-            current_price = info.get("currentPrice")
-            if current_price is None:
-                current_price = info.get("regularMarketPrice")
+                try:
 
-            currency = info.get("currency", "")
+                    stock = yf.Ticker(symbol)
+                    info = stock.info
+                    history = stock.history(period="1y")
 
-            st.subheader("📊 Stock Overview")
+                    if not info or history.empty:
+                        st.error("Stock data is unavailable.")
+                        st.stop()
 
-            c1, c2, c3, c4 = st.columns(4)
+                    # ---------------- COMPANY DETAILS ----------------
 
-            c1.metric(
-                "Current Price",
-                f"{currency} {current_price:,.2f}"
-                if current_price is not None else "N/A"
-            )
+                    company = info.get("longName", symbol)
+                    currency = info.get("currency", "")
 
-            c2.metric(
-                "Market Cap",
-                format_number(info.get("marketCap"))
-            )
+                    st.success(f"Found: {company} ({symbol})")
 
-            c3.metric(
-                "Trailing P/E",
-                format_number(info.get("trailingPE"))
-            )
+                    st.header(company)
 
-            c4.metric(
-                "Forward P/E",
-                format_number(info.get("forwardPE"))
-            )
+                    description = info.get(
+                        "longBusinessSummary",
+                        "Company description unavailable."
+                    )
 
-            # Financial metrics
-            st.subheader("💰 Financial Metrics")
+                    st.write(description)
 
-            c1, c2, c3, c4 = st.columns(4)
+                    st.divider()
 
-            c1.metric(
-                "EPS",
-                format_number(info.get("trailingEps"))
-            )
+                    # ---------------- PRICE OVERVIEW ----------------
 
-            c2.metric(
-                "Revenue",
-                format_number(info.get("totalRevenue"))
-            )
+                    st.subheader("📊 Stock Overview")
 
-            c3.metric(
-                "Net Income",
-                format_number(info.get("netIncomeToCommon"))
-            )
+                    current_price = info.get("currentPrice")
 
-            c4.metric(
-                "Dividend Yield",
-                f"{info.get('dividendYield') * 100:.2f}%"
-                if info.get("dividendYield") is not None
-                else "N/A"
-            )
+                    if current_price is None:
+                        current_price = info.get("regularMarketPrice")
 
-            # Valuation and risk
-            st.subheader("📌 Valuation & Risk")
+                    previous_close = info.get("previousClose")
 
-            c1, c2, c3, c4 = st.columns(4)
+                    change = None
 
-            c1.metric(
-                "52 Week High",
-                format_number(info.get("fiftyTwoWeekHigh"))
-            )
+                    if current_price is not None and previous_close:
+                        change = (
+                            (current_price - previous_close)
+                            / previous_close
+                        ) * 100
 
-            c2.metric(
-                "52 Week Low",
-                format_number(info.get("fiftyTwoWeekLow"))
-            )
+                    c1, c2, c3, c4 = st.columns(4)
 
-            c3.metric(
-                "Beta",
-                format_number(info.get("beta"))
-            )
+                    c1.metric(
+                        "Current Price",
+                        f"{currency} {current_price:,.2f}"
+                        if current_price is not None else "N/A",
+                        f"{change:.2f}%"
+                        if change is not None else None
+                    )
 
-            c4.metric(
-                "Price to Book",
-                format_number(info.get("priceToBook"))
-            )
+                    c2.metric(
+                        "Market Cap",
+                        format_number(info.get("marketCap"))
+                    )
 
-            st.divider()
+                    c3.metric(
+                        "Trailing P/E",
+                        format_number(info.get("trailingPE"))
+                    )
 
-            # Historical chart
-            st.subheader("📈 Historical Price Chart")
+                    c4.metric(
+                        "Forward P/E",
+                        format_number(info.get("forwardPE"))
+                    )
 
-            period = st.selectbox(
-                "Select Time Period",
-                ["1mo", "3mo", "6mo", "1y", "2y", "5y"]
-            )
+                    # ---------------- FINANCIAL METRICS ----------------
 
-            chart_data = stock.history(period=period)
+                    st.subheader("💰 Financial Metrics")
 
-            if not chart_data.empty:
+                    c1, c2, c3, c4 = st.columns(4)
 
-                fig = go.Figure()
+                    c1.metric(
+                        "EPS",
+                        format_number(info.get("trailingEps"))
+                    )
 
-                fig.add_trace(go.Scatter(
-                    x=chart_data.index,
-                    y=chart_data["Close"],
-                    mode="lines",
-                    name="Closing Price",
-                    line=dict(color="#38bdf8", width=2)
-                ))
+                    c2.metric(
+                        "Revenue",
+                        format_number(info.get("totalRevenue"))
+                    )
 
-                fig.update_layout(
-                    template="plotly_dark",
-                    height=450,
-                    xaxis_title="Date",
-                    yaxis_title=f"Price ({currency})",
-                    paper_bgcolor="#0b1120",
-                    plot_bgcolor="#151f32",
-                    hovermode="x unified"
-                )
+                    c3.metric(
+                        "Net Income",
+                        format_number(info.get("netIncomeToCommon"))
+                    )
 
-                st.plotly_chart(
-                    fig,
-                    use_container_width=True
-                )
+                    dividend = info.get("dividendYield")
 
-            # Company information
-            st.subheader("🏢 Company Information")
+                    c4.metric(
+                        "Dividend Yield",
+                        f"{dividend * 100:.2f}%"
+                        if dividend is not None else "N/A"
+                    )
 
-            c1, c2 = st.columns(2)
+                    # ---------------- VALUATION ----------------
 
-            with c1:
-                st.write("**Sector:**", info.get("sector", "N/A"))
-                st.write("**Industry:**", info.get("industry", "N/A"))
-                st.write("**Country:**", info.get("country", "N/A"))
+                    st.subheader("📌 Valuation & Risk")
 
-            with c2:
-                st.write("**Employees:**", format_number(
-                    info.get("fullTimeEmployees")
-                ))
-                st.write("**Website:**", info.get("website", "N/A"))
-                st.write("**Exchange:**", info.get("exchange", "N/A"))
+                    c1, c2, c3, c4 = st.columns(4)
 
-            st.success("Stock analysis completed!")
+                    c1.metric(
+                        "52 Week High",
+                        format_number(info.get("fiftyTwoWeekHigh"))
+                    )
 
-        except Exception as e:
-            st.error(f"Unable to fetch stock data: {e}")
+                    c2.metric(
+                        "52 Week Low",
+                        format_number(info.get("fiftyTwoWeekLow"))
+                    )
 
-elif search:
-    st.warning("Please enter a stock symbol.")
+                    c3.metric(
+                        "Beta",
+                        format_number(info.get("beta"))
+                    )
+
+                    c4.metric(
+                        "Price to Book",
+                        format_number(info.get("priceToBook"))
+                    )
+
+                    st.divider()
+
+                    # ---------------- HISTORICAL CHART ----------------
+
+                    st.subheader("📈 Historical Stock Price")
+
+                    period = st.selectbox(
+                        "Select Time Period",
+                        ["1mo", "3mo", "6mo", "1y", "2y", "5y"]
+                    )
+
+                    chart_data = stock.history(period=period)
+
+                    if not chart_data.empty:
+
+                        fig = go.Figure()
+
+                        fig.add_trace(
+                            go.Scatter(
+                                x=chart_data.index,
+                                y=chart_data["Close"],
+                                mode="lines",
+                                name="Closing Price",
+                                line=dict(
+                                    color="#38bdf8",
+                                    width=2
+                                )
+                            )
+                        )
+
+                        fig.update_layout(
+                            template="plotly_dark",
+                            height=450,
+                            xaxis_title="Date",
+                            yaxis_title=f"Price ({currency})",
+                            paper_bgcolor="#0b1120",
+                            plot_bgcolor="#151f32",
+                            hovermode="x unified"
+                        )
+
+                        st.plotly_chart(
+                            fig,
+                            use_container_width=True
+                        )
+
+                    else:
+
+                        st.warning("Historical data unavailable.")
+
+                    # ---------------- COMPANY INFORMATION ----------------
+
+                    st.subheader("🏢 Company Information")
+
+                    c1, c2 = st.columns(2)
+
+                    with c1:
+
+                        st.write(
+                            "**Sector:**",
+                            info.get("sector", "N/A")
+                        )
+
+                        st.write(
+                            "**Industry:**",
+                            info.get("industry", "N/A")
+                        )
+
+                        st.write(
+                            "**Country:**",
+                            info.get("country", "N/A")
+                        )
+
+                    with c2:
+
+                        st.write(
+                            "**Employees:**",
+                            format_number(
+                                info.get("fullTimeEmployees")
+                            )
+                        )
+
+                        st.write(
+                            "**Website:**",
+                            info.get("website", "N/A")
+                        )
+
+                        st.write(
+                            "**Exchange:**",
+                            info.get("exchange", "N/A")
+                        )
+
+                    st.success("Analysis completed!")
+
+                except Exception as e:
+
+                    st.error(f"Unable to fetch stock data: {e}")
+
+
+# ---------------- FOOTER ----------------
 
 st.divider()
 
 st.caption(
-    "Data source: Yahoo Finance via yfinance. "
+    "Data Source: Yahoo Finance via yfinance | "
     "Data may be delayed or unavailable. "
     "For educational and research purposes only."
 )
